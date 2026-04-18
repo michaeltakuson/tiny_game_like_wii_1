@@ -1,0 +1,1429 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
+  <title>WINGMAN - 鳥人間フライヤー</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background-color: #000; font-family: sans-serif; user-select: none; }
+    canvas { display: block; }
+    .font-retro { font-family: 'Press Start 2P', cursive; }
+
+    .app-container {
+      width: 100vw; height: 100vh;
+      display: flex; flex-direction: row; overflow: hidden;
+    }
+    @media (max-width: 768px) { .app-container { flex-direction: column; } }
+
+    /* ── Camera panel ── */
+    .camera-panel {
+      width: 50%; height: 100%;
+      position: relative; border-right: 1px solid #1f2937;
+      background-color: #111827;
+    }
+    @media (max-width: 768px) {
+      .camera-panel { width: 100%; height: 50%; border-right: none; border-bottom: 1px solid #1f2937; }
+    }
+    .camera-container {
+      position: relative; width: 100%; height: 100%;
+      overflow: hidden; display: flex; align-items: center; justify-content: center;
+    }
+    #video {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      object-fit: cover; transform: scaleX(-1); opacity: 0;
+    }
+    #poseCanvas {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      object-fit: cover; transform: scaleX(-1);
+    }
+    .camera-offline {
+      position: absolute; inset: 0; display: flex;
+      align-items: center; justify-content: center; color: #4b5563; font-size: 1.1rem;
+    }
+    .loading-overlay {
+      position: absolute; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      background-color: rgba(0,0,0,.8); z-index: 20;
+    }
+    .loading-text { color: #22d3ee; font-family: monospace; animation: pulse 2s ease infinite; }
+    .camera-error {
+      position: absolute; inset: 0; display: flex;
+      align-items: center; justify-content: center;
+      background-color: rgba(127,29,29,.9); z-index: 30; padding: 2rem; text-align: center;
+    }
+    .instructions-overlay {
+      position: absolute; bottom: .5rem; left: .5rem;
+      background-color: rgba(0,0,0,.6); backdrop-filter: blur(12px);
+      padding: .5rem .75rem; border-left: 4px solid #06b6d4; z-index: 10; pointer-events: none;
+    }
+    .instructions-content {
+      display: flex; align-items: center; gap: .75rem;
+      font-size: 1.1rem; font-weight: bold; color: white; letter-spacing: .05em;
+    }
+    .status-dot { width: .5rem; height: .5rem; border-radius: 50%; }
+    .dot-cyan { background-color: #22d3ee; }
+    .dot-red  { background-color: #ef4444; }
+
+    /* ── Game panel ── */
+    .game-panel { width: 50%; height: 100%; position: relative; background-color: black; }
+    @media (max-width: 768px) { .game-panel { width: 100%; height: 50%; } }
+    #gameContainer { width: 100%; height: 100%; background-color: black; }
+
+    /* ── Flash overlay ── */
+    #screenFlash {
+      position: absolute; inset: 0; pointer-events: none; z-index: 50;
+      opacity: 0; transition: opacity .5s ease-out;
+    }
+
+    /* ── Altitude indicator (right side bar) ── */
+    #altitudeIndicator {
+      position: absolute; right: .75rem; top: 50%; transform: translateY(-50%);
+      width: 18px; height: 160px;
+      background: rgba(0,0,0,.5); border: 2px solid rgba(255,255,255,.3);
+      border-radius: 9px; overflow: hidden; z-index: 15; pointer-events: none; display: none;
+    }
+    #altitudeFill {
+      position: absolute; bottom: 0; left: 0; width: 100%; height: 50%;
+      background: #22c55e; transition: height .1s, background-color .2s;
+      border-radius: 0 0 7px 7px;
+    }
+
+    /* ── Ground warning ── */
+    #altitudeWarning {
+      position: absolute; bottom: 2.5rem; left: 50%; transform: translateX(-50%);
+      color: #ef4444; font-size: 1.0rem; font-family: 'Press Start 2P', cursive;
+      background: rgba(0,0,0,.75); padding: 4px 10px; border: 2px solid #ef4444;
+      z-index: 15; pointer-events: none; display: none;
+      animation: pulse .5s ease infinite;
+    }
+
+    /* ── Ground proximity bar (bottom edge) ── */
+    #groundProximity {
+      position: absolute; bottom: 0; left: 0; width: 100%; height: 6px;
+      z-index: 15; pointer-events: none; display: none;
+    }
+    #groundBar { height: 100%; width: 0%; background: linear-gradient(to right, #22c55e, #ef4444); transition: width .1s; }
+
+    /* ── Next pipe hint ── */
+    #nextPipeHint {
+      position: absolute; top: 18rem; left: 50%; transform: translateX(-50%);
+      font-size: 0.85rem; font-family: 'Press Start 2P', cursive; color: white;
+      background: rgba(0,0,0,.6); padding: 4px 10px; border: 2px solid rgba(255,255,255,.4);
+      z-index: 15; pointer-events: none; display: none; white-space: nowrap;
+      transition: opacity .3s;
+    }
+
+    /* ── HUD ── */
+    .hud-overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      pointer-events: none; display: flex; flex-direction: column;
+      align-items: center; justify-content: space-between; padding: 1rem; z-index: 20;
+    }
+    .score-display {
+      font-size: 3rem; color: white; text-shadow: 5px 5px 0 rgba(0,0,255,1);
+      margin-top: 1rem; backdrop-filter: blur(12px); padding: 2px 20px;
+      text-align: center; border: 4px solid rgb(193,193,255);
+    }
+    @media (min-width: 768px) { .score-display { font-size: 5rem; } }
+
+    #highScoreDisplay {
+      position: absolute; top: 1rem; left: 1rem; font-size: 0.85rem; color: rgba(255,255,255,.7);
+      font-family: 'Press Start 2P', cursive; background: rgba(0,0,0,.5);
+      padding: 4px 8px; border: 1px solid rgba(255,255,255,.3); pointer-events: none; display: none;
+    }
+    #newBestDisplay {
+      position: absolute; top: 4rem; font-size: 0.9rem; color: #facc15;
+      font-family: 'Press Start 2P', cursive; background: rgba(0,0,0,.75);
+      padding: 4px 10px; border: 2px solid #facc15; pointer-events: none; display: none;
+      animation: pulse .8s ease infinite;
+    }
+
+
+    /* ── Tutorial overlay (fixed, full screen) ── */
+    #tutorialOverlay {
+      position: fixed; inset: 0; background: rgba(0,0,10,.93);
+      z-index: 200; display: flex; align-items: center; justify-content: center; padding: 1.5rem;
+    }
+    .tutorial-panel {
+      background: rgba(0,0,30,.97); border: 4px solid #22d3ee;
+      padding: 2rem; max-width: 560px; width: 100%;
+      box-shadow: 0 0 40px rgba(34,211,238,.35); overflow-y: auto; max-height: 95vh;
+    }
+    .tutorial-title {
+      font-family: 'Press Start 2P', cursive; color: #22d3ee;
+      font-size: 1.3rem; text-align: center; margin-bottom: 1.5rem;
+    }
+    .tutorial-steps { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem; }
+    .tutorial-step { display: flex; align-items: flex-start; gap: .75rem; }
+    .step-num { font-family: 'Press Start 2P', cursive; font-size: 1.1rem; color: #22d3ee; min-width: 2rem; padding-top: 2px; }
+    .step-txt { font-size: 1.0rem; line-height: 2.0; color: #d1fae5; }
+    .step-txt .hl  { color: #facc15; }
+    .step-txt .dan { color: #f87171; }
+    .pipe-legend { display: flex; gap: 1rem; margin-top: .4rem; flex-wrap: wrap; }
+    .pipe-item { display: flex; align-items: center; gap: .5rem; font-size: 0.85rem; color: white; }
+    .pipe-swatch { width: 14px; height: 36px; border-radius: 3px; flex-shrink: 0; }
+    .pipe-swatch.top { background: linear-gradient(to bottom, #60a5fa, #1d4ed8); }
+    .pipe-swatch.bot { background: linear-gradient(to top,   #f87171, #b91c1c); }
+    .tutorial-btn {
+      width: 100%; background: #22d3ee; color: #000;
+      border: 4px solid white; padding: 1rem;
+      font-family: 'Press Start 2P', cursive; font-size: 1.1rem; cursor: pointer; transition: all .2s;
+    }
+    .tutorial-btn:hover { background: #67e8f9; transform: scale(1.02); }
+
+    /* ── Start screen ── */
+    .start-screen {
+      display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%;
+    }
+    .start-panel {
+      background-color: rgba(0,0,0,.6); backdrop-filter: blur(12px);
+      padding: 3rem; text-align: center; border: 4px solid white; pointer-events: auto;
+    }
+    .game-title {
+      font-size: 2.5rem; color: #22d3ee; margin-bottom: 1rem;
+      letter-spacing: -.025em; text-shadow: 4px 4px 0 #000;
+    }
+    @media (min-width: 768px) { .game-title { font-size: 3rem; } }
+    .game-subtitle { color: white; font-size: 1.0rem; margin-bottom: 3rem; letter-spacing: .1em; opacity: .8; }
+    .init-section { display: flex; flex-direction: column; align-items: center; gap: 1.5rem; }
+    .start-button {
+      background-color: #dc2626; color: white; border: 4px solid white;
+      padding: 1.5rem 2rem; font-size: 1.25rem; cursor: pointer;
+      animation: pulse 2s ease infinite; transition: all .2s; box-shadow: 0 0 20px rgba(220,38,38,.5);
+    }
+    @media (min-width: 768px) { .start-button { font-size: 1.5rem; } }
+    .start-button:hover { background-color: #ef4444; transform: scale(1.05); }
+    .ready-section {
+      display: flex; flex-direction: column; align-items: center; gap: 1rem;
+      animation: fadeInUp .5s ease-out;
+    }
+    .init-instructions { color: #d1d5db; font-size: 1.0rem; max-width: 22rem; line-height: 1.8; }
+    @media (min-width: 768px) { .init-instructions { font-size: 1.0rem; } }
+    .takeoff-panel {
+      background: linear-gradient(to right, #06b6d4, #2563eb);
+      padding: 1.5rem 2.5rem; border: 4px solid white;
+      box-shadow: 0 0 30px rgba(6,182,212,.6); animation: pulse 2s ease infinite;
+    }
+    .takeoff-text { color: white; font-size: 1rem; font-weight: bold; letter-spacing: .05em; }
+    @media (min-width: 768px) { .takeoff-text { font-size: 1.25rem; } }
+
+    /* ── Game Over screen ── */
+    .game-over-panel {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+      background-color: rgba(127,29,29,.5); backdrop-filter: blur(12px);
+      padding: 2.5rem; text-align: center; border: 4px solid #ef4444;
+      pointer-events: auto; box-shadow: 0 0 50px rgba(255,0,0,.5);
+    }
+    .game-over-title { font-size: 2rem; color: white; margin-bottom: .4rem; text-shadow: 4px 4px 0 #000; }
+    @media (min-width: 768px) { .game-over-title { font-size: 3rem; } }
+    #deathReasonText { font-size: 1.0rem; margin-bottom: 1rem; min-height: 1.5em; }
+    .final-score-section { margin-bottom: 2rem; }
+    .final-score-label { color: #fff; font-size: 1.2rem; margin-bottom: .5rem; }
+    .final-score-value { font-size: 4rem; color: #ffd500; text-shadow: 4px 4px 0 rgba(0,0,0,.8); }
+    @media (min-width: 768px) { .final-score-value { font-size: 5rem; } }
+    #gameOverBest { font-size: 0.9rem; color: rgba(255,255,255,.7); margin-top: .25rem; }
+    .restart-section {
+      display: flex; flex-direction: column; align-items: center; gap: 1.5rem;
+      min-height: 80px; justify-content: center;
+    }
+    .recharging-container { display: flex; flex-direction: column; align-items: center; gap: .5rem; }
+    .spinner {
+      width: 2rem; height: 2rem; border: 4px solid white; border-top-color: transparent;
+      border-radius: 50%; animation: spin 1s linear infinite;
+    }
+    .recharging-text { font-size: 1.0rem; color: rgba(255,255,255,.7); }
+    .restart-button {
+      background-color: white; color: black; border: 4px solid black;
+      padding: 1rem 2rem; font-size: 1.1rem; cursor: pointer; transition: all .2s;
+    }
+    .restart-button:hover { background-color: #facc15; transform: scale(1.05); }
+    .flap-hint { font-size: 1.0rem; color: rgba(255,255,255,.7); animation: pulse 2s ease infinite; }
+
+    .hidden { display: none !important; }
+
+    /* ── Angle display overlay (center of camera) ── */
+    #angleDisplay {
+      position: absolute; bottom: 4.5rem; left: 50%; transform: translateX(-50%);
+      background: rgba(0,0,0,0.82); padding: .6rem 1.2rem;
+      z-index: 16; pointer-events: none; text-align: center;
+      display: none; border: 3px solid #ef4444; border-radius: 4px;
+      min-width: 180px; transition: border-color .15s;
+    }
+    #angleDisplay .ang-val {
+      font-size: 2.2rem; font-family: 'Press Start 2P', cursive;
+      color: #ef4444; display: block; transition: color .15s;
+    }
+    #angleDisplay .ang-state {
+      font-size: .65rem; font-family: 'Press Start 2P', cursive;
+      color: #fca5a5; display: block; margin-top: .3rem; transition: color .15s;
+    }
+    #angleDisplay .ang-pwr {
+      font-size: .55rem; font-family: 'Press Start 2P', cursive;
+      color: #facc15; display: block; margin-top: .2rem;
+    }
+
+    /* ── Power meter (camera panel, left side) ── */
+    #powerMeterWrap {
+      position: absolute; left: .6rem; bottom: 3.5rem;
+      display: flex; flex-direction: column; align-items: center; gap: .3rem;
+      z-index: 15; pointer-events: none;
+    }
+    #powerMeter {
+      width: 18px; height: 130px;
+      background: rgba(0,0,0,.55); border: 2px solid rgba(255,255,255,.35);
+      border-radius: 9px; overflow: hidden; position: relative;
+    }
+    #powerThresholdLine {
+      position: absolute; left: 0; width: 100%; height: 2px;
+      background: rgba(255,255,255,.6);
+      bottom: 50%; /* UP_THRESHOLD=45°/90° */
+    }
+    #powerFill {
+      position: absolute; bottom: 0; left: 0; width: 100%;
+      height: 0%; background: #ef4444;
+      transition: height .08s, background-color .1s;
+      border-radius: 0 0 7px 7px;
+    }
+    #powerStateLabel {
+      font-size: .6rem; font-family: 'Press Start 2P', cursive;
+      color: white; background: rgba(0,0,0,.7);
+      padding: 3px 5px; white-space: nowrap; text-align: center;
+    }
+    #powerValueLabel {
+      font-size: .55rem; font-family: 'Press Start 2P', cursive;
+      color: #facc15; background: rgba(0,0,0,.7);
+      padding: 2px 5px; white-space: nowrap; text-align: center; display: none;
+    }
+
+    /* ── Tips popup ── */
+    #tipsPopup {
+      position: fixed; inset: 0; background: rgba(0,0,10,.93);
+      z-index: 300; display: none; align-items: center; justify-content: center; padding: 1.5rem;
+    }
+    #tipsPopup.open { display: flex; }
+    .tips-panel {
+      background: rgba(0,20,0,.97); border: 4px solid #22c55e;
+      padding: 2rem; max-width: 560px; width: 100%;
+      box-shadow: 0 0 40px rgba(34,197,94,.35); overflow-y: auto; max-height: 92vh;
+    }
+    .tips-title {
+      font-family: 'Press Start 2P', cursive; color: #22c55e;
+      font-size: 1.1rem; text-align: center; margin-bottom: 1.5rem;
+    }
+    .tips-list { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 1.5rem; }
+    .tips-item { display: flex; align-items: flex-start; gap: .75rem; }
+    .tips-icon { font-size: 1.3rem; min-width: 2rem; }
+    .tips-txt  { font-size: .9rem; line-height: 2.0; color: #bbf7d0; }
+    .tips-txt .hl  { color: #facc15; }
+    .tips-txt .dan { color: #f87171; }
+    .tips-close-btn {
+      width: 100%; background: #22c55e; color: #000;
+      border: 4px solid white; padding: 1rem;
+      font-family: 'Press Start 2P', cursive; font-size: 1.0rem; cursor: pointer; transition: all .2s;
+    }
+    .tips-close-btn:hover { background: #4ade80; transform: scale(1.02); }
+
+    /* ── Tips button in game over ── */
+    .tips-open-btn {
+      background: transparent; color: #86efac;
+      border: 2px solid #86efac; padding: .6rem 1.2rem;
+      font-family: 'Press Start 2P', cursive; font-size: .8rem;
+      cursor: pointer; transition: all .2s;
+    }
+    .tips-open-btn:hover { background: rgba(134,239,172,.15); transform: scale(1.03); }
+
+    @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.5} }
+    @keyframes spin  { to{transform:rotate(360deg)} }
+    @keyframes fadeInUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes bounce {
+      0%,100%{transform:translateY(-25%);animation-timing-function:cubic-bezier(.8,0,1,1)}
+      50%{transform:translateY(0);animation-timing-function:cubic-bezier(0,0,.2,1)}
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ======= Tips popup ======= -->
+  <div id="tipsPopup">
+    <div class="tips-panel">
+      <h2 class="tips-title">💡 うまく飛ぶコツ</h2>
+      <div class="tips-list">
+        <div class="tips-item">
+          <span class="tips-icon">①</span>
+          <span class="tips-txt">
+            腕を<span class="hl">水平より少し上（40度以上）</span>まで上げてチャージしてから、
+            <span class="hl">素早く振り下ろす</span>のが基本。肩より上まで上げなくてOK。
+          </span>
+        </div>
+        <div class="tips-item">
+          <span class="tips-icon">②</span>
+          <span class="tips-txt">
+            振り下ろしの<span class="hl">スピードが命。</span>
+            ゆっくり下ろすと弱く上昇、<span class="hl">勢いよく振るほど</span>グンと高く飛べる。
+            フォームより「速さ」を意識しよう。
+          </span>
+        </div>
+        <div class="tips-item">
+          <span class="tips-icon">③</span>
+          <span class="tips-txt">
+            カメラ左側の<span class="hl">パワーバー</span>を見て練習しよう。
+            バーが<span class="hl">緑色</span>になるまで上げてから振り下ろすと強いフラップになる。
+          </span>
+        </div>
+        <div class="tips-item">
+          <span class="tips-icon">④</span>
+          <span class="tips-txt">
+            <span class="dan">下から柱（赤）</span>が来たら積極的にフラップして高度を維持。
+            <span class="dan">上から柱（青）</span>が来たら大きく飛びすぎないよう小さめに。
+          </span>
+        </div>
+        <div class="tips-item">
+          <span class="tips-icon">⑤</span>
+          <span class="tips-txt">
+            高度バー（ゲーム画面右）が<span class="dan">赤くなる前</span>にフラップ。
+            一度落ちすぎると急回復が難しいため、<span class="hl">高めをキープ</span>するのがコツ。
+          </span>
+        </div>
+        <div class="tips-item">
+          <span class="tips-icon">⑥</span>
+          <span class="tips-txt">
+            慣れてきたら「小さく素早く」連続フラップも有効。
+            大きな1回より<span class="hl">小刻み高速フラップ</span>で安定飛行できる。
+          </span>
+        </div>
+      </div>
+      <button class="tips-close-btn font-retro" id="tipsCloseBtn">閉じる</button>
+    </div>
+  </div>
+
+  <!-- ======= Tutorial overlay (full screen, shown first) ======= -->
+  <div id="tutorialOverlay">
+    <div class="tutorial-panel">
+      <h2 class="tutorial-title">🐦 WINGMAN 遊び方</h2>
+
+      <div class="tutorial-steps">
+        <div class="tutorial-step">
+          <span class="step-num">①</span>
+          <span class="step-txt">
+            カメラの前に立ち、<span class="hl">上半身が全部映る</span>ように少し離れてください。
+          </span>
+        </div>
+        <div class="tutorial-step">
+          <span class="step-num">②</span>
+          <span class="step-txt">
+            両腕を<span class="hl">垂らした状態から45度以上</span>持ち上げるとチャージ状態になります。
+            肩より上げなくてOK・水平以下でもOK。左のパワーバーが<span class="hl">黄→緑</span>になればベスト。
+          </span>
+        </div>
+        <div class="tutorial-step">
+          <span class="step-num">③</span>
+          <span class="step-txt">
+            チャージ後、腕を<span class="hl">素早く振り下ろす</span>とフラップ！<br>
+            <span class="dan">振り下ろしが速いほど高く飛べます。</span><br>
+            ゆっくり下ろす → 少し上昇 ／ 勢いよく振る → 大きく上昇
+          </span>
+        </div>
+        <div class="tutorial-step">
+          <span class="step-num">④</span>
+          <span class="step-txt">
+            柱は<span class="hl">一本ずつ</span>ランダムに登場します：
+            <div class="pipe-legend">
+              <div class="pipe-item">
+                <div class="pipe-swatch top"></div>
+                <span><span class="dan">上から柱（青）</span> → 飛び過ぎると衝突！</span>
+              </div>
+              <div class="pipe-item">
+                <div class="pipe-swatch bot"></div>
+                <span><span class="dan">下から柱（赤）</span> → 低すぎると衝突！</span>
+              </div>
+            </div>
+          </span>
+        </div>
+        <div class="tutorial-step">
+          <span class="step-num">⑤</span>
+          <span class="step-txt">
+            右側の<span class="hl">高度バー</span>と画面下の<span class="hl">地面警告</span>に注意して
+            できるだけ長く飛び続けよう！<br>
+            <span style="color:#888">※ スペースキーでもフラップできます（テスト用）</span>
+          </span>
+        </div>
+      </div>
+
+      <button class="tutorial-btn font-retro" id="tutorialCloseBtn">
+        わかった！ → START
+      </button>
+    </div>
+  </div>
+
+  <!-- ======= Main layout ======= -->
+  <div class="app-container">
+
+    <!-- Left Panel: Camera -->
+    <div class="camera-panel">
+      <div class="camera-container">
+        <video id="video" playsinline></video>
+        <canvas id="poseCanvas"></canvas>
+
+        <div id="cameraOffline" class="camera-offline font-retro">カメラ オフライン</div>
+
+        <div id="loadingOverlay" class="loading-overlay hidden">
+          <p class="loading-text font-retro">カメラ初期化中...</p>
+        </div>
+
+        <div id="cameraError" class="camera-error hidden">
+          <p class="text-white font-bold font-retro" style="font-size:1.0rem">
+            カメラへのアクセスが必要です。<br>ブラウザの許可設定を確認してください。
+          </p>
+        </div>
+
+        <div id="instructionsOverlay" class="instructions-overlay hidden">
+          <div class="instructions-content font-retro">
+            <span style="display:flex;align-items:center;gap:.25rem">
+              <div class="status-dot dot-cyan"></div> 腕を上げる
+            </span>
+            <span style="display:flex;align-items:center;gap:.25rem">
+              <div class="status-dot dot-red"></div> フラップ！
+            </span>
+          </div>
+        </div>
+
+        <!-- Angle display: shows real-time arm angle & state -->
+        <div id="angleDisplay">
+          <span class="ang-val">0°</span>
+          <span class="ang-state">腕を上げて！</span>
+          <span class="ang-pwr" style="display:none"></span>
+        </div>
+
+        <!-- Power meter: shows arm angle & flap charge -->
+        <div id="powerMeterWrap" style="display:none">
+          <div id="powerMeter">
+            <div id="powerThresholdLine"></div>
+            <div id="powerFill"></div>
+          </div>
+          <div id="powerStateLabel">待機</div>
+          <div id="powerValueLabel"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right Panel: Game -->
+    <div class="game-panel">
+      <div id="gameContainer"></div>
+
+      <!-- Flash overlay -->
+      <div id="screenFlash"></div>
+
+      <!-- Altitude bar -->
+      <div id="altitudeIndicator"><div id="altitudeFill"></div></div>
+
+      <!-- Ground warning text -->
+      <div id="altitudeWarning" class="font-retro">⚠ 地面接近！</div>
+
+      <!-- Ground proximity bar (bottom strip) -->
+      <div id="groundProximity"><div id="groundBar"></div></div>
+
+      <!-- Next pipe hint -->
+      <div id="nextPipeHint" class="font-retro"></div>
+
+      <!-- HUD -->
+      <div class="hud-overlay">
+        <div id="highScoreDisplay" class="font-retro">BEST: <span id="highScoreValue">0</span></div>
+        <div id="newBestDisplay" class="font-retro">★ 新記録！</div>
+
+        <!-- Live score -->
+        <div id="liveScore" class="score-display font-retro hidden">0</div>
+
+        <!-- Start screen -->
+        <div id="startScreen" class="start-screen hidden">
+          <div class="start-panel">
+            <h1 class="game-title font-retro">WINGMAN</h1>
+            <p class="game-subtitle font-retro">鳥人間フライヤー</p>
+
+            <div id="initSection" class="init-section">
+              <button id="startButton" class="start-button font-retro">START</button>
+            </div>
+
+            <div id="readySection" class="ready-section hidden">
+              <p class="init-instructions font-retro">上半身が全部映るように少し離れてください</p>
+              <div class="takeoff-panel">
+                <p class="takeoff-text font-retro">腕を羽ばたかせて離陸！</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Game Over screen -->
+        <div id="gameOverScreen" class="game-over-panel hidden">
+          <h2 class="game-over-title font-retro">GAME OVER</h2>
+          <p id="deathReasonText" class="font-retro"></p>
+
+          <div class="final-score-section">
+            <p class="final-score-label font-retro">最終スコア</p>
+            <p id="finalScore" class="final-score-value font-retro">0</p>
+            <p id="gameOverBest" class="font-retro">BEST: <span id="gameOverBestValue">0</span></p>
+          </div>
+
+          <div class="restart-section">
+            <div id="rechargingState" class="recharging-container">
+              <div class="spinner"></div>
+              <p class="recharging-text font-retro">リチャージ中...</p>
+            </div>
+            <div id="readyToRestartState" class="hidden" style="display:flex;flex-direction:column;align-items:center;gap:1.5rem">
+              <button id="restartButton" class="restart-button font-retro">TRY AGAIN</button>
+              <p class="flap-hint font-retro">腕を羽ばたかせて再スタート</p>
+            </div>
+          </div>
+          <div style="margin-top:1rem">
+            <button id="tipsOpenBtn" class="tips-open-btn font-retro">💡 うまく飛ぶコツ</button>
+          </div>
+          <div style="margin-top:1.2rem; background:rgba(0,0,0,.55); border:2px solid rgba(255,220,80,.5); border-radius:8px; padding:0.8rem 1rem; max-width:340px; text-align:left;">
+            <p class="font-retro" style="font-size:0.55rem; color:#fde68a; margin:0 0 0.5rem;">💬 開発者からのアドバイス</p>
+            <p class="font-retro" style="font-size:0.5rem; color:#fef3c7; line-height:1.8; margin:0;">
+              上から出てくる柱（▲上柱）は難しい！<br>
+              コツは<span style="color:#86efac;">一つ前の柱を越えたら翼を閉じて自由落下</span>し、<br>
+              上柱のギリギリを過ぎたあたりで<span style="color:#86efac;">一気に羽ばたく</span>と安定して抜けられるよ。
+            </p>
+          </div>
+        </div>
+
+      </div><!-- /hud-overlay -->
+    </div><!-- /game-panel -->
+  </div><!-- /app-container -->
+
+  <script>
+    // ──────────────────────────────────────────
+    // CONSTANTS
+    // ──────────────────────────────────────────
+    const GRAVITY        = 32;
+    const SPAWN_INTERVAL = 3.5;
+    const PIPE_SPAWN_Z   = -430;
+    const GROUND_KILL    = -65;
+    const CEILING_KILL   = 110;
+    const WARN_THRESHOLD = -25;
+
+    // Flap power system
+    // New reference: 0°=arms hanging down, 90°=horizontal, 180°=straight up
+    const UP_THRESHOLD   = 45;   // 45° from hanging = arms raised partway, still below horizontal
+    const DOWN_THRESHOLD = 12;   // return to near-hanging to trigger flap
+    const JUMP_MIN       = 14;
+    const JUMP_MAX       = 36;
+    const JUMP_DEFAULT   = 22;
+    const DROP_SPD_MIN   = 30;
+    const DROP_SPD_MAX   = 200;
+
+    // Terrain
+    const VOXEL_SIZE          = 6;
+    const VOXEL_GEOMETRY_SIZE = 6.1;
+    const TERRAIN_WIDTH       = 50;
+    const TERRAIN_DEPTH       = 80;
+    const TERRAIN_START_Z     = 20;
+    const TERRAIN_FLOOR       = -200;
+
+    // ──────────────────────────────────────────
+    // STATE
+    // ──────────────────────────────────────────
+    const GS = { TUTORIAL:'TUTORIAL', START:'START', PLAYING:'PLAYING', GAME_OVER:'GAME_OVER' };
+    let gameState  = GS.TUTORIAL;
+    let score      = 0;
+    let canRestart = true;
+    let isInit     = false;
+    let deathReason = '';          // 'pipe' | 'ground' | 'ceiling'
+    let highScore  = parseInt(localStorage.getItem('wingman_hs') || '0');
+    let newBestThisGame = false;
+    let cameraShake = 0;
+    let gameOverTime = 0;
+    let spawnTimer   = SPAWN_INTERVAL;
+
+    // ──────────────────────────────────────────
+    // AUDIO
+    // ──────────────────────────────────────────
+    let flapSynth = null, scoreSynth = null, audioReady = false;
+    const CHORDS = [
+      ["C3","G3","B3","E4","G4"], ["E3","G3","A3","C4","E4"],
+      ["G3","A3","C4","E4","G4"], ["C4","E4","G4","B4","C5"],
+    ];
+
+    async function initAudio() {
+      if (audioReady || !window.Tone) return;
+      await window.Tone.start();
+      audioReady = true;
+
+      flapSynth = new window.Tone.NoiseSynth({
+        noise: { type:"brown", playbackRate:1.0 },
+        envelope: { attack:.2, decay:.6, sustain:0 }
+      }).toDestination();
+      const flapFilt = new window.Tone.Filter(400,"lowpass").toDestination();
+      flapSynth.connect(flapFilt);
+      flapSynth.volume.value = -8;
+
+      scoreSynth = new window.Tone.PolySynth(window.Tone.Synth, {
+        maxPolyphony: 12,
+        oscillator: { type:"sine" },
+        envelope: { attack:.2, decay:.5, sustain:.2, release:2 }
+      });
+      const scoreFilter = new window.Tone.Filter(9000,"lowpass").toDestination();
+      const reverb = new window.Tone.Reverb({ decay:2, wet:.5 }).toDestination();
+      scoreSynth.chain(scoreFilter, reverb);
+      scoreSynth.volume.value = -15;
+    }
+
+    function playFlap()  { if (flapSynth)  flapSynth.triggerAttackRelease("4n"); }
+    function playScore() {
+      if (scoreSynth) {
+        const v = CHORDS[Math.floor(Math.random()*CHORDS.length)];
+        scoreSynth.triggerAttackRelease(v,"4n");
+      }
+    }
+
+    // ──────────────────────────────────────────
+    // POSE / CAMERA  (angle + speed based flap)
+    // ──────────────────────────────────────────
+    let armState      = 'DOWN';  // 'DOWN' | 'UP'
+    let armAngle      = 0;       // current avg arm angle (degrees above horizontal)
+    let prevArmAngle  = 0;
+    let lastPoseTime  = 0;
+    let peakAngle     = 0;       // max angle reached in UP state
+    let peakDropSpeed = 0;       // max downstroke speed (deg/sec)
+    let lastFlapTime  = -9999;   // timestamp of last flap (for canvas flash)
+
+    // arm angle from vertical-down (0°=arms hanging, 90°=horizontal, 180°=straight up)
+    function getArmAngle(shoulder, wrist) {
+      const dx = Math.abs(wrist.x - shoulder.x);
+      const dy = -(wrist.y - shoulder.y); // flip: image Y goes down
+      return Math.atan2(dy, dx) * 180 / Math.PI + 90;
+    }
+
+    // power = weighted mix of angle (how high raised) + drop speed
+    // Angle 0=hanging, 90=horizontal, 180=straight up
+    // Useful charge range: UP_THRESHOLD (45°) → 120° (well above horizontal)
+    function computeFlapPower(peak, dropSpd) {
+      const angleFactor = Math.max(0, Math.min(1, (peak - UP_THRESHOLD) / (120 - UP_THRESHOLD)));
+      const speedFactor = Math.max(0, Math.min(1, (dropSpd - DROP_SPD_MIN) / (DROP_SPD_MAX - DROP_SPD_MIN)));
+      const combined    = angleFactor * 0.3 + speedFactor * 0.7;
+      return JUMP_MIN + combined * (JUMP_MAX - JUMP_MIN);
+    }
+
+    // Draw a glowing thick line (arm highlight)
+    function drawGlowLine(ctx, x1, y1, x2, y2, color, width) {
+      ctx.save();
+      ctx.shadowColor = color;
+      ctx.shadowBlur  = 18;
+      ctx.strokeStyle = color;
+      ctx.lineWidth   = width;
+      ctx.lineCap     = 'round';
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Update the DOM angle display (no canvas mirroring needed)
+    function updateAngleDisplay(angle, state) {
+      const disp  = document.getElementById('angleDisplay');
+      const valEl = disp.querySelector('.ang-val');
+      const stEl  = disp.querySelector('.ang-state');
+      const pwEl  = disp.querySelector('.ang-pwr');
+      if (!disp) return;
+
+      const msSinceFlap = performance.now() - lastFlapTime;
+
+      let color, stateText;
+      if (msSinceFlap < 400) {
+        color = '#ffffff'; stateText = '🚀 FLAP！';
+      } else if (state === 'UP' && angle >= 75) {
+        color = '#00ff88'; stateText = 'MAX！振り下ろせ！';
+      } else if (state === 'UP') {
+        color = '#ffd700'; stateText = 'チャージ中 ↓';
+      } else {
+        // 0°=down, 45°=threshold, 90°=horizontal
+        color = '#ef4444';
+        stateText = angle < 20 ? '腕が下がってる' : '上げてチャージ！';
+      }
+
+      valEl.textContent = Math.round(angle) + '°';
+      valEl.style.color = color;
+      stEl.textContent  = stateText;
+      stEl.style.color  = color;
+      disp.style.borderColor = color;
+
+      if (state === 'UP') {
+        const pw = Math.round(computeFlapPower(peakAngle, peakDropSpeed));
+        pwEl.textContent = `PWR: ${pw} / ${JUMP_MAX}`;
+        pwEl.style.display = 'block';
+      } else {
+        pwEl.style.display = 'none';
+      }
+    }
+
+    function updatePowerMeter(angle, state) {
+      const wrap  = document.getElementById('powerMeterWrap');
+      const fill  = document.getElementById('powerFill');
+      const label = document.getElementById('powerStateLabel');
+      const valLb = document.getElementById('powerValueLabel');
+      if (!wrap) return;
+
+      // 0°=hanging→0%, 90°=horizontal→100% (cap bar at horizontal)
+      const pct = Math.max(0, Math.min(100, angle / 90 * 100));
+      fill.style.height = pct + '%';
+
+      if (angle < UP_THRESHOLD) {         // below 45°: not yet charging
+        fill.style.backgroundColor = '#ef4444';
+        label.textContent = '待機';
+        label.style.color = '#fca5a5';
+        valLb.style.display = 'none';
+      } else if (angle < 75) {            // 45°-75°: charging
+        fill.style.backgroundColor = '#facc15';
+        label.textContent = 'チャージ中';
+        label.style.color = '#facc15';
+        valLb.style.display = 'none';
+      } else {                            // 75°+: max charge (near or above horizontal)
+        fill.style.backgroundColor = '#22c55e';
+        label.textContent = 'MAX!';
+        label.style.color = '#86efac';
+        const pw = Math.round(computeFlapPower(angle, peakDropSpeed));
+        valLb.textContent = 'PWR ' + pw;
+        valLb.style.display = 'block';
+      }
+    }
+
+    function initPose() {
+      if (!window.Pose || !window.Camera) { console.error("MediaPipe not loaded"); return; }
+      const video  = document.getElementById('video');
+      const canvas = document.getElementById('poseCanvas');
+      const ctx    = canvas.getContext('2d');
+
+      document.getElementById('cameraOffline').classList.add('hidden');
+      document.getElementById('loadingOverlay').classList.remove('hidden');
+
+      const pose = new window.Pose({
+        locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${f}`
+      });
+      pose.setOptions({
+        modelComplexity:1, smoothLandmarks:true,
+        enableSegmentation:false, minDetectionConfidence:.5, minTrackingConfidence:.5
+      });
+
+      pose.onResults(results => {
+        document.getElementById('loadingOverlay').classList.add('hidden');
+        document.getElementById('instructionsOverlay').classList.remove('hidden');
+        document.getElementById('powerMeterWrap').style.display = 'flex';
+        document.getElementById('angleDisplay').style.display = 'block';
+
+        canvas.width  = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const W = canvas.width, H = canvas.height;
+
+        ctx.save();
+        ctx.clearRect(0, 0, W, H);
+        ctx.drawImage(results.image, 0, 0, W, H);
+
+        if (results.poseLandmarks) {
+          const masked = results.poseLandmarks.map((lm, i) =>
+            i < 11 ? { x:0, y:0, z:0, visibility:0 } : lm
+          );
+          const ls = results.poseLandmarks[11], rs = results.poseLandmarks[12];
+          const lw = results.poseLandmarks[15], rw = results.poseLandmarks[16];
+          const le = results.poseLandmarks[13], re = results.poseLandmarks[14];
+
+          const lVis = lw && lw.visibility > .35;
+          const rVis = rw && rw.visibility > .35;
+
+          // ── Angle measurement & state machine ──
+          if (ls && rs && (lVis || rVis)) {
+            const lA = lVis ? getArmAngle(ls, lw) : 0;
+            const rA = rVis ? getArmAngle(rs, rw) : 0;
+            armAngle = (lVis && rVis) ? (lA + rA) / 2 : (lVis ? lA : rA);
+
+            const now = performance.now();
+            const dt  = lastPoseTime > 0 ? Math.min((now - lastPoseTime) / 1000, .12) : 0;
+            lastPoseTime = now;
+
+            const angleVelocity = dt > 0 ? (armAngle - prevArmAngle) / dt : 0;
+            prevArmAngle = armAngle;
+
+            if (armState === 'DOWN' && armAngle >= UP_THRESHOLD) {
+              armState      = 'UP';
+              peakAngle     = armAngle;
+              peakDropSpeed = 0;
+            } else if (armState === 'UP') {
+              peakAngle = Math.max(peakAngle, armAngle);
+              if (angleVelocity < 0) {
+                peakDropSpeed = Math.max(peakDropSpeed, -angleVelocity);
+              }
+              if (armAngle < DOWN_THRESHOLD) {
+                armState = 'DOWN';
+                lastFlapTime = performance.now();
+                const power = computeFlapPower(peakAngle, peakDropSpeed);
+                handleFlap(power);
+                peakAngle     = 0;
+                peakDropSpeed = 0;
+              }
+            }
+
+            updatePowerMeter(armAngle, armState);
+            updateAngleDisplay(armAngle, armState);
+          }
+
+          // ── Skeleton color based on angle ──
+          const msSinceFlap = performance.now() - lastFlapTime;
+          let skelCol;
+          if (msSinceFlap < 300)             skelCol = '#FFFFFF';  // white flash
+          else if (armAngle >= 75)           skelCol = '#00FF88';  // max charge = green
+          else if (armAngle >= UP_THRESHOLD) skelCol = '#FFD700';  // charging = yellow
+          else                               skelCol = '#FF4444';  // waiting = red
+
+          window.drawConnectors(ctx, masked, window.POSE_CONNECTIONS,
+            { color: skelCol, lineWidth: 5 });
+          window.drawLandmarks(ctx, masked,
+            { color: skelCol, lineWidth: 2, radius: d => d.index < 11 ? 0 : 5 });
+
+          // ── Glowing arm lines (thickness = angle magnitude) ──
+          const glowWidth = Math.max(4, Math.min(14, armAngle / 7));
+          if (ls && lVis && lw) drawGlowLine(ctx, ls.x*W, ls.y*H, lw.x*W, lw.y*H, skelCol, glowWidth);
+          if (rs && rVis && rw) drawGlowLine(ctx, rs.x*W, rs.y*H, rw.x*W, rw.y*H, skelCol, glowWidth);
+
+          // ── White screen flash on flap ──
+          if (msSinceFlap < 200) {
+            ctx.fillStyle = `rgba(255,255,255,${(1 - msSinceFlap/200) * 0.45})`;
+            ctx.fillRect(0, 0, W, H);
+          }
+        }
+        ctx.restore();
+      });
+
+      const cam = new window.Camera(video, {
+        onFrame: async () => { await pose.send({ image: video }); },
+        width: 1000, height: 1000
+      });
+      cam.start().catch(err => {
+        console.error("Camera error", err);
+        document.getElementById('loadingOverlay').classList.add('hidden');
+        document.getElementById('cameraError').classList.remove('hidden');
+      });
+    }
+
+    // ──────────────────────────────────────────
+    // THREE.JS SCENE
+    // ──────────────────────────────────────────
+    let scene, cam3d, renderer;
+    let player = { y:25, velocity:0 };
+    let pipes   = [];
+    let pipeIdx = 0;
+    let lastTime = 0;
+    let worldSpeed = 24;
+    let terrainMesh = null, terrainRows = [], furthestGenZ = 0;
+
+    let pipeGeo, rimGeo, pipeMat;
+    const dummy = new THREE.Object3D();
+
+    // Pipe color palettes by type
+    const TOP_COLORS = [
+      new THREE.Color(0x3B82F6), new THREE.Color(0x8B5CF6), new THREE.Color(0x06B6D4)
+    ];
+    const BOT_COLORS = [
+      new THREE.Color(0xEF4444), new THREE.Color(0xF97316), new THREE.Color(0xFF0055)
+    ];
+
+    // Terrain colors
+    const C_WATER = new THREE.Color(0x2389da);
+    const C_SAND  = new THREE.Color(0xe6c288);
+    const C_GRASS = new THREE.Color(0x5a7d38);
+    const C_STONE = new THREE.Color(0x757575);
+    const C_SNOW  = new THREE.Color(0xffffff);
+
+    function noise(x, z) {
+      const wx = x + Math.sin(z*.025)*20, wz = z + Math.sin(x*.025)*20;
+      return Math.sin(wx*.013+wz*.017)*25 + Math.sin(wx*.04-wz*.03)*10 + Math.sin(wx*.1+wz*.1)*3;
+    }
+
+    function makeSkyTexture() {
+      const c = document.createElement('canvas'); c.width = 2; c.height = 512;
+      const ctx = c.getContext('2d');
+      const g = ctx.createLinearGradient(0,0,0,512);
+      g.addColorStop(0,  '#6B5B95'); g.addColorStop(.4, '#C3A6CB');
+      g.addColorStop(.7, '#FFB7B2'); g.addColorStop(1,  '#FFDAC1');
+      ctx.fillStyle = g; ctx.fillRect(0,0,2,512);
+      const t = new THREE.CanvasTexture(c);
+      t.encoding = THREE.sRGBEncoding; return t;
+    }
+
+    function disposeObj(obj) {
+      obj.traverse(ch => {
+        if (ch.isMesh) {
+          if (Array.isArray(ch.material)) ch.material.forEach(m=>m.dispose());
+          else if (ch.material) ch.material.dispose();
+        }
+      });
+    }
+
+    function rowSetData(row, logZ) {
+      let idx = row.meshIndex;
+      for (let x = 0; x < TERRAIN_WIDTH; x++) {
+        const xw = (x - TERRAIN_WIDTH/2)*VOXEL_SIZE;
+        let yh = -75 + noise(xw, logZ);
+        const col = row.colors[x];
+        if      (yh < -100) { yh = -105; col.copy(C_WATER); }
+        else if (yh < -95)  col.copy(C_SAND);
+        else if (yh < -65)  { col.copy(C_GRASS); col.offsetHSL(0,0,(Math.random()-.5)*.1); }
+        else if (yh < -45)  { col.copy(C_STONE); col.offsetHSL(0,0,(Math.random()-.5)*.05); }
+        else                 col.copy(C_SNOW);
+        row.heights[x] = yh;
+        if (terrainMesh) terrainMesh.setColorAt(idx, col);
+        idx++;
+      }
+    }
+
+    function rowSetMesh(row) {
+      if (!terrainMesh) return;
+      let idx = row.meshIndex;
+      for (let x = 0; x < TERRAIN_WIDTH; x++) {
+        const xw  = (x - TERRAIN_WIDTH/2)*VOXEL_SIZE;
+        const sy  = row.heights[x];
+        const scY = Math.max(.1, (sy - TERRAIN_FLOOR)/VOXEL_GEOMETRY_SIZE);
+        const cy  = (sy + TERRAIN_FLOOR)/2;
+        dummy.position.set(xw, cy, row.z);
+        dummy.scale.set(1, scY, 1);
+        dummy.updateMatrix();
+        terrainMesh.setMatrixAt(idx, dummy.matrix);
+        idx++;
+      }
+    }
+
+    // ── Single-pipe creation ──────────────────
+    function createPipe(zPos) {
+      if (!scene || !pipeGeo || !rimGeo || !pipeMat) return;
+
+      // Slightly more bottom pipes (gravity makes them harder)
+      const type = Math.random() < .55 ? 'bottom' : 'top';
+
+      const diff = Math.min(35, 10 + score * .6);
+      let edgeY;
+      if (type === 'top') {
+        // edgeY = bottom edge of the hanging pipe — player must stay BELOW
+        edgeY = 58 + (Math.random()*2-1)*diff;
+        edgeY = Math.max(38, Math.min(82, edgeY));
+      } else {
+        // edgeY = top edge of the rising pipe — player must stay ABOVE
+        edgeY = -5 + (Math.random()*2-1)*diff;
+        edgeY = Math.max(-35, Math.min(18, edgeY));
+      }
+
+      const palette = type === 'top' ? TOP_COLORS : BOT_COLORS;
+      const color   = palette[pipeIdx % palette.length].clone();
+      pipeIdx++;
+
+      const PIPE_H  = 220;
+      const HALF_H  = PIPE_H / 2;
+
+      const mat = pipeMat.clone();
+      mat.color.copy(color); mat.emissive.copy(color); mat.emissiveIntensity = .6;
+
+      const mesh = new THREE.Mesh(pipeGeo, mat);
+      mesh.position.y = type === 'top' ? edgeY + HALF_H : edgeY - HALF_H;
+
+      // Bright rim at the danger edge
+      const rimColor = new THREE.Color(0xFFDD00);
+      const rimMat   = pipeMat.clone();
+      rimMat.color.copy(rimColor); rimMat.emissive.copy(rimColor); rimMat.emissiveIntensity = 2.0;
+      const rim = new THREE.Mesh(rimGeo, rimMat);
+      rim.position.y = type === 'top' ? -HALF_H : HALF_H;
+      mesh.add(rim);
+
+      const group = new THREE.Group();
+      group.add(mesh);
+      group.position.z = zPos;
+      group.userData = { passed:false, type, edgeY };
+      scene.add(group);
+      pipes.push(group);
+    }
+
+    // ── Flash + shake on collision ────────────
+    function flashScreen(color) {
+      const el = document.getElementById('screenFlash');
+      el.style.transition = 'opacity 0s';
+      el.style.backgroundColor = color;
+      el.style.opacity = '.75';
+      requestAnimationFrame(() => {
+        el.style.transition = 'opacity .6s ease-out';
+        el.style.opacity = '0';
+      });
+    }
+
+    function triggerGameOver(reason) {
+      if (gameState === GS.GAME_OVER) return;
+      deathReason = reason;
+      if (reason === 'pipe') {
+        player.velocity = (Math.random() > .5 ? 1 : -1) * 12;
+        cameraShake = 7;
+        flashScreen('rgba(255,0,0,.75)');
+      } else if (reason === 'ground') {
+        player.velocity = 0;
+        flashScreen('rgba(120,60,10,.75)');
+      } else {
+        player.velocity = -10;
+        flashScreen('rgba(180,180,255,.75)');
+      }
+      setGameState(GS.GAME_OVER);
+      gameOverTime = Date.now();
+    }
+
+    // ── Reset ─────────────────────────────────
+    function resetGame() {
+      player = { y:25, velocity:0 };
+      score  = 0;
+      newBestThisGame = false;
+      cameraShake = 0;
+      spawnTimer  = SPAWN_INTERVAL;
+      pipeIdx     = 0;
+      document.getElementById('newBestDisplay').style.display = 'none';
+      updateScoreDisplay();
+
+      if (scene) {
+        pipes.forEach(p => { disposeObj(p); scene.remove(p); });
+        pipes = [];
+        for (let i = 0; i < 5; i++) createPipe(-150 - i*70);
+      }
+      if (cam3d) cam3d.rotation.x = 0;
+
+      if (terrainMesh && terrainRows.length > 0) {
+        let lastZ = 0;
+        for (let i = 0; i < TERRAIN_DEPTH; i++) {
+          const z = TERRAIN_START_Z - i*VOXEL_SIZE;
+          const r = terrainRows[i]; r.z = z;
+          rowSetData(r, z); rowSetMesh(r); lastZ = z;
+        }
+        furthestGenZ = lastZ;
+        terrainMesh.instanceMatrix.needsUpdate = true;
+        if (terrainMesh.instanceColor) terrainMesh.instanceColor.needsUpdate = true;
+      }
+    }
+
+    // ── Scene init ────────────────────────────
+    function initScene() {
+      const container = document.getElementById('gameContainer');
+
+      scene = new THREE.Scene();
+      scene.background = makeSkyTexture();
+      scene.fog = new THREE.Fog(0xC3A6CB, 120, 400);
+
+      cam3d = new THREE.PerspectiveCamera(75, container.clientWidth/container.clientHeight, .1, 1000);
+
+      renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:"high-performance" });
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.shadowMap.enabled = true;
+      container.appendChild(renderer.domElement);
+
+      scene.add(new THREE.HemisphereLight(0xC3A6CB, 0x222222, .8));
+      const dl = new THREE.DirectionalLight(0xFFDAC1, 1.2);
+      dl.position.set(50,100,50); dl.castShadow = true; scene.add(dl);
+
+      pipeGeo = new THREE.CylinderGeometry(9, 9, 220, 32);
+      rimGeo  = new THREE.CylinderGeometry(11, 11, 6, 32);
+      pipeMat = new THREE.MeshStandardMaterial({ roughness:.1, metalness:.1 });
+
+      for (let i = 0; i < TERRAIN_DEPTH; i++) {
+        const heights = new Float32Array(TERRAIN_WIDTH);
+        const colors  = Array.from({length:TERRAIN_WIDTH}, ()=>new THREE.Color());
+        terrainRows.push({ z:0, meshIndex:i*TERRAIN_WIDTH, heights, colors });
+      }
+
+      const total = TERRAIN_WIDTH * TERRAIN_DEPTH;
+      const tGeo  = new THREE.BoxGeometry(VOXEL_GEOMETRY_SIZE, VOXEL_GEOMETRY_SIZE, VOXEL_GEOMETRY_SIZE);
+      const tMat  = new THREE.MeshStandardMaterial({ roughness:.8, metalness:.1 });
+      terrainMesh = new THREE.InstancedMesh(tGeo, tMat, total);
+      terrainMesh.frustumCulled = false;
+      scene.add(terrainMesh);
+
+      renderer.compile(scene, cam3d);
+      resetGame();
+      window.addEventListener('resize', onResize);
+      lastTime = performance.now();
+      requestAnimationFrame(loop);
+    }
+
+    function onResize() {
+      const c = document.getElementById('gameContainer');
+      if (!c || !cam3d || !renderer) return;
+      cam3d.aspect = c.clientWidth / c.clientHeight;
+      cam3d.updateProjectionMatrix();
+      renderer.setSize(c.clientWidth, c.clientHeight);
+    }
+
+    // ── HUD updates ───────────────────────────
+    function updateAltitudeHUD() {
+      const range = CEILING_KILL - GROUND_KILL;
+      const pct   = Math.max(0, Math.min(100, (player.y - GROUND_KILL) / range * 100));
+      const fill  = document.getElementById('altitudeFill');
+      if (fill) {
+        fill.style.height = pct + '%';
+        fill.style.backgroundColor = pct < 15 ? '#ef4444' : pct < 30 ? '#f97316' : '#22c55e';
+      }
+      const warn = document.getElementById('altitudeWarning');
+      if (warn) warn.style.display = player.y < WARN_THRESHOLD ? 'block' : 'none';
+
+      const groundPct = player.y < WARN_THRESHOLD
+        ? Math.max(0, Math.min(100, (WARN_THRESHOLD - player.y) / (WARN_THRESHOLD - GROUND_KILL) * 100))
+        : 0;
+      const bar = document.getElementById('groundBar');
+      if (bar) bar.style.width = groundPct + '%';
+    }
+
+    function updateNextPipeHint() {
+      const el = document.getElementById('nextPipeHint');
+      if (!el) return;
+      if (score > 6) { el.style.display = 'none'; return; }
+      let closest = null, closestDist = Infinity;
+      for (const p of pipes) {
+        if (p.position.z < 0) {
+          const d = -p.position.z;
+          if (d < closestDist) { closestDist = d; closest = p; }
+        }
+      }
+      if (closest && closestDist < 220) {
+        const t = closest.userData.type;
+        if (t === 'top') {
+          el.textContent = '▲ 上柱 → 低く飛べ！';
+          el.style.borderColor = '#60a5fa'; el.style.color = '#93c5fd';
+        } else {
+          el.textContent = '▼ 下柱 → 高く飛べ！';
+          el.style.borderColor = '#f87171'; el.style.color = '#fca5a5';
+        }
+        el.style.opacity = Math.max(0, Math.min(1, (220-closestDist)/150)).toString();
+        el.style.display = 'block';
+      } else {
+        el.style.display = 'none';
+      }
+    }
+
+    // ── Main loop ─────────────────────────────
+    function loop(time) {
+      const dt = Math.min((time - lastTime)/1000, .1);
+      lastTime = time;
+
+      if (gameState === GS.PLAYING) {
+        player.velocity -= GRAVITY * dt;
+        player.y        += player.velocity * dt;
+
+        if (player.y < GROUND_KILL)  { triggerGameOver('ground'); }
+
+        // Pipe spawning
+        spawnTimer -= dt;
+        if (spawnTimer <= 0) { createPipe(PIPE_SPAWN_Z); spawnTimer = SPAWN_INTERVAL; }
+
+        // Pipe update + collision
+        for (let i = pipes.length-1; i >= 0; i--) {
+          const p = pipes[i];
+          p.position.z += worldSpeed * dt;
+
+          if (p.position.z > -8 && p.position.z < 8) {
+            const { type, edgeY } = p.userData;
+            const r = 1.5; // player collision radius
+            if (type === 'top'    && player.y > edgeY - r) triggerGameOver('pipe');
+            if (type === 'bottom' && player.y < edgeY + r) triggerGameOver('pipe');
+          }
+
+          if (p.position.z > 5 && !p.userData.passed) {
+            p.userData.passed = true;
+            playScore();
+            score++;
+            updateScoreDisplay();
+            if (score > highScore) {
+              highScore = score;
+              localStorage.setItem('wingman_hs', highScore);
+              document.getElementById('highScoreValue').textContent = highScore;
+              if (!newBestThisGame) {
+                newBestThisGame = true;
+                document.getElementById('newBestDisplay').style.display = 'block';
+              }
+            }
+          }
+
+          if (p.position.z > 10) { disposeObj(p); scene.remove(p); pipes.splice(i,1); }
+        }
+
+        // Terrain scroll
+        const ts = worldSpeed * dt;
+        const tLen = TERRAIN_DEPTH * VOXEL_SIZE;
+        const recycleAt = TERRAIN_START_Z + VOXEL_SIZE;
+        let colorDirty = false;
+        for (const row of terrainRows) {
+          row.z += ts;
+          if (row.z > recycleAt) {
+            row.z -= tLen; furthestGenZ -= VOXEL_SIZE;
+            rowSetData(row, furthestGenZ); colorDirty = true;
+          }
+          rowSetMesh(row);
+        }
+        terrainMesh.instanceMatrix.needsUpdate = true;
+        if (colorDirty && terrainMesh.instanceColor) terrainMesh.instanceColor.needsUpdate = true;
+
+        updateAltitudeHUD();
+        updateNextPipeHint();
+
+      } else if (gameState === GS.START) {
+        player.y = 25 + Math.sin(time/500);
+      }
+      // GAME_OVER: camera stays at death position (flash+shake are enough feedback)
+
+      if (cam3d) {
+        cam3d.position.y = player.y;
+        if (cameraShake > .1) {
+          cam3d.position.x = (Math.random()-.5)*cameraShake;
+          cameraShake *= .78;
+        } else { cam3d.position.x = 0; cameraShake = 0; }
+        cam3d.rotation.x += (-player.velocity*.015 - cam3d.rotation.x)*.05;
+      }
+
+      if (renderer && scene && cam3d) renderer.render(scene, cam3d);
+      requestAnimationFrame(loop);
+    }
+
+    // ──────────────────────────────────────────
+    // UI MANAGEMENT
+    // ──────────────────────────────────────────
+    function setGameState(newState) {
+      gameState = newState;
+      updateUI();
+      if (newState === GS.START)     resetGame();
+      if (newState === GS.GAME_OVER) {
+        canRestart = false;
+        setTimeout(() => { canRestart = true; updateGameOverUI(); }, 2000);
+      }
+    }
+
+    function updateUI() {
+      const ss   = document.getElementById('startScreen');
+      const gos  = document.getElementById('gameOverScreen');
+      const ls   = document.getElementById('liveScore');
+      const altI = document.getElementById('altitudeIndicator');
+      const gndP = document.getElementById('groundProximity');
+      const nph  = document.getElementById('nextPipeHint');
+      const hsd  = document.getElementById('highScoreDisplay');
+      const tutO = document.getElementById('tutorialOverlay');
+
+      // Hide everything first
+      [ss, gos].forEach(el => el.classList.add('hidden'));
+      ls.classList.add('hidden');
+      [altI, gndP, nph, hsd].forEach(el => el.style.display = 'none');
+      tutO.style.display = 'none';
+
+      if (gameState === GS.TUTORIAL) {
+        tutO.style.display = 'flex';
+
+      } else if (gameState === GS.START) {
+        ss.classList.remove('hidden');
+
+      } else if (gameState === GS.PLAYING) {
+        ls.classList.remove('hidden');
+        altI.style.display = 'block';
+        gndP.style.display = 'block';
+        nph.style.display  = 'block';
+        hsd.style.display  = 'block';
+        document.getElementById('highScoreValue').textContent = highScore;
+
+      } else if (gameState === GS.GAME_OVER) {
+        gos.classList.remove('hidden');
+        ls.classList.remove('hidden');
+        document.getElementById('finalScore').textContent = score;
+        document.getElementById('gameOverBestValue').textContent = highScore;
+
+        const rt = document.getElementById('deathReasonText');
+        if (deathReason === 'pipe') {
+          rt.textContent = '💥 パイプに衝突！';
+          rt.style.color = '#f87171';
+        } else if (deathReason === 'ground') {
+          rt.textContent = '💨 地面に激突！';
+          rt.style.color = '#fb923c';
+        } else {
+          rt.textContent = '⭐ 天井に衝突！';
+          rt.style.color = '#a78bfa';
+        }
+        updateGameOverUI();
+      }
+    }
+
+    function updateGameOverUI() {
+      const rch = document.getElementById('rechargingState');
+      const rdy = document.getElementById('readyToRestartState');
+      if (!canRestart) {
+        rch.style.display = 'flex';
+        rdy.classList.add('hidden');
+      } else {
+        rch.style.display = 'none';
+        rdy.classList.remove('hidden');
+        rdy.style.display = 'flex';
+      }
+    }
+
+    function updateScoreDisplay() {
+      document.getElementById('liveScore').textContent = score;
+    }
+
+    function handleFlap(power = JUMP_DEFAULT) {
+      if (gameState === GS.START && isInit) {
+        playFlap(); setGameState(GS.PLAYING); player.velocity = power; return;
+      }
+      if (gameState === GS.GAME_OVER && !canRestart) return;
+      if (gameState === GS.GAME_OVER && canRestart) {
+        if (Date.now() - gameOverTime > 2000) {
+          playFlap(); resetGame(); setGameState(GS.PLAYING); player.velocity = power;
+        }
+        return;
+      }
+      if (gameState === GS.PLAYING) {
+        playFlap();
+        player.velocity = power;
+      }
+    }
+
+    function showTips() { document.getElementById('tipsPopup').classList.add('open'); }
+    function hideTips() { document.getElementById('tipsPopup').classList.remove('open'); }
+
+    async function handleStart() {
+      try {
+        await initAudio();
+        isInit = true;
+        document.getElementById('initSection').classList.add('hidden');
+        document.getElementById('readySection').classList.remove('hidden');
+        initPose();
+      } catch(e) { console.error("Init failed", e); }
+    }
+
+    // ──────────────────────────────────────────
+    // EVENT LISTENERS
+    // ──────────────────────────────────────────
+    document.getElementById('tutorialCloseBtn').addEventListener('click', () => setGameState(GS.START));
+    document.getElementById('startButton').addEventListener('click', handleStart);
+    document.getElementById('restartButton').addEventListener('click', () => {
+      if (!canRestart) return;
+      setGameState(GS.START); score = 0; updateScoreDisplay();
+    });
+    document.getElementById('tipsOpenBtn').addEventListener('click', showTips);
+    document.getElementById('tipsCloseBtn').addEventListener('click', hideTips);
+
+    // Space key: fixed power for keyboard testing
+    document.addEventListener('keydown', e => {
+      if (e.code === 'Space') { e.preventDefault(); handleFlap(JUMP_DEFAULT); }
+    });
+
+    // ──────────────────────────────────────────
+    // BOOT
+    // ──────────────────────────────────────────
+    window.addEventListener('DOMContentLoaded', () => {
+      initScene();
+      updateUI();
+    });
+  </script>
+</body>
+</html>
